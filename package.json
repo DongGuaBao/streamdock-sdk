@@ -1,0 +1,67 @@
+{
+    "name": "@mirabox/streamdock-sdk",
+    "version": "2.0.0",
+    "type": "module",
+    "description": "StreamDock plugin development SDK",
+    "author": "MiraBox",
+    "license": "MIT",
+    "main": "./dist/index.cjs",
+    "module": "./dist/index.mjs",
+    "types": "./dist/index.d.mts",
+    "exports": {
+        ".": {
+            "types": "./dist/index.d.mts",
+            "import": "./dist/index.mjs",
+            "require": "./dist/index.cjs"
+        },
+        "./node": {
+            "types": "./dist/node/index.d.mts",
+            "import": "./dist/node/index.mjs",
+            "require": "./dist/node/index.cjs"
+        },
+        "./web": {
+            "types": "./dist/web/index.d.mts",
+            "import": "./dist/web/index.mjs"
+        },
+        "./property": {
+            "types": "./dist/web/property.d.mts",
+            "import": "./dist/web/property.mjs"
+        },
+        "./types": {
+            "types": "./dist/types.d.mts"
+        }
+    },
+    "files": [
+        "dist"
+    ],
+    "peerDependencies": {
+        "log4js": "^6.9.1",
+        "vue": "^3.5.35",
+        "ws": "^8.21.0"
+    },
+    "peerDependenciesMeta": {
+        "vue": {
+            "optional": true
+        },
+        "log4js": {
+            "optional": true
+        },
+        "ws": {
+            "optional": true
+        }
+    },
+    "devDependencies": {
+        "@types/node": "^25.9.1",
+        "@types/ws": "^8.18.1",
+        "log4js": "^6.9.1",
+        "tsdown": "^0.22.1",
+        "typescript": "^6.0.3",
+        "vue": "^3.5.35",
+        "ws": "^8.21.0"
+    },
+    "scripts": {
+        "build": "tsdown",
+        "prepublishOnly": "npm run build",
+        "prepare": "npm run build"
+    }
+}

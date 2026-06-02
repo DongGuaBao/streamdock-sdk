@@ -1,0 +1,12 @@
+{
+    "compilerOptions": {
+        "types": ["node"],
+        "target": "ES2020",
+        "module": "ESNext",
+        "moduleResolution": "Bundler",
+        "strict": true,
+        "skipLibCheck": true,
+        "verbatimModuleSyntax": true
+    },
+    "include": ["src/types.ts", "src/**/*.ts", "./tsdown.config.ts"]
+}
