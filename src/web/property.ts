@@ -93,14 +93,6 @@ export class Property {
     public regEvent!: string;
     /** Property Inspector UUID */
     public uuid!: string;
-    /**
-     * 当前 settings 的 Vue ref。
-     *
-     * **自动持久化** — 修改此对象的任意属性会自动保存到 Stream Dock。
-     * 在 Vue 模板中使用 `v-model="settings.xxx"` 即可实现双向绑定+自动保存。
-     */
-    public settings!: JsonObject;
-    /** WebSocket 连接 */
     public ws!: WebSocket;
     public reactiveProperty!: Reactive<PropertyInterface>;
     constructor() {}
@@ -231,7 +223,6 @@ export class Property {
         }
         if (data.event === "sendToPropertyInspector") {
             this.sendToPropertyInspectorEvent(data);
-        } else {
         }
     }
 
@@ -286,6 +277,8 @@ export class Property {
     sendToPropertyInspectorEvent(data: any) {
         const payload = data.payload;
         if (this._rpc.handleIncoming(payload, this)) return;
+        this.reactiveProperty.sendToPropertyInspector(data);
+        this.sendToPropertyInspector?.(data);
     }
 
     /**
@@ -308,4 +301,5 @@ export class Property {
     /** settings 改变后触发（可选实现） */
     didReceiveSettings?(data: StreamDockEvents.DidReceiveSettings): void;
     didReceiveGlobalSettings?: (data: StreamDockEvents.DidReceiveGlobalSettings) => void;
+    sendToPropertyInspector?: (data: StreamDockEvents.SendToPropertyInspector) => void;
 }

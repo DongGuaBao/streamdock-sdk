@@ -98,34 +98,6 @@ export class Action {
     }
 
     /**
-     * 调用 Property Inspector 端的方法（RPC）。
-     *
-     * ```ts
-     * const result = await action.callPropertyInspector('getFormData');
-     * ```
-     *
-     * @param method - Property Inspector 端的方法名
-     * @param args - 方法参数
-     * @returns Promise，resolve 为方法的返回值
-     */
-    callPropertyInspector(method: string, ...args: any[]): Promise<any> {
-        return this._rpc.call(method, ...args);
-    }
-
-    /**
-     * Property Inspector 的 RPC Proxy。
-     *
-     * ```ts
-     * await action.property.setTitle('Hello');
-     * // 等价于
-     * await action.callPropertyInspector('setTitle', 'Hello');
-     * ```
-     */
-    get property(): any {
-        return this._rpc.createProxy();
-    }
-
-    /**
      * 设置按键显示的标题文字。
      * @param str - 要显示的标题字符串
      * @remarks 等价于 `BasePlugin.instance.setTitle(this.context, str)`
