@@ -53,9 +53,21 @@ export class Plugin extends BasePlugin {
         this.hasInit = true;
         const Self = this;
         window.startPlugin = async function () {
-            let response;
+            let response: any;
             try {
-                response = await (await fetch(`./${window.argv[3].application.language}.json`)).json();
+                response = await new Promise((resolve, reject) => {
+                    const xhr = new XMLHttpRequest();
+                    xhr.open("GET", `./${window.argv[3].application.language}.json`);
+                    xhr.onload = () => {
+                        if (xhr.status === 200) {
+                            resolve(JSON.parse(xhr.responseText));
+                        } else {
+                            reject(new Error(`HTTP ${xhr.status}`));
+                        }
+                    };
+                    xhr.onerror = () => reject(new Error("Network error"));
+                    xhr.send();
+                });
                 window._i18n = response["Localization"] || {};
             } catch {
                 window._i18n = {};
@@ -103,7 +115,7 @@ export class Plugin extends BasePlugin {
             if ((this as any)[data.event](data)) return;
         }
         if (data.event === "didReceiveGlobalSettings") {
-            this.globalSettings = data.payload as Record<string, unknown>;
+            this.globalSettings = data.payload as JsonObject;
         }
         if (data.event == "deviceDidConnect") {
             this.devices[(data as any).device] = true;

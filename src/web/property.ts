@@ -108,9 +108,19 @@ export class Property {
         window.PropertyClass = Property;
         window.PropertyApp = mountApp;
         window.startProperty = async function () {
-            let response;
+            let response: any;
             try {
-                response = await (await fetch(`./${window.argv[3].application.language}.json`)).json();
+                response = await new Promise((resolve, reject) => {
+                    const xhr = new XMLHttpRequest();
+                    xhr.open("GET", `./${window.argv[3].application.language}.json`);
+                    xhr.onreadystatechange = () => {
+                        if (xhr.readyState === 4) {
+                            resolve(JSON.parse(xhr.responseText));
+                        }
+                    };
+                    xhr.onerror = () => reject(new Error("Network error"));
+                    xhr.send();
+                });
                 window._i18n = response["Localization"] || {};
             } catch {
                 window._i18n = {};
@@ -214,7 +224,7 @@ export class Property {
         }
         if (data.event === "didReceiveSettings") {
             this.preventWatch = true;
-            this.reactiveProperty.settings.value = data.payload.settings;
+            this.reactiveProperty.settings = data.payload.settings;
             nextTick(() => {
                 this.preventWatch = false;
             });
