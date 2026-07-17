@@ -88,7 +88,7 @@ declare global {
         argv: StreamDock.Argv;
 
         /** 由 polyfill 注入，连接 Stream Dock WebSocket 的入口函数 */
-        connectSDSocket(): void;
+        connectSDSocket(arg1: any, arg2: any, arg3: any, arg4: any): void;
 
         /** Web 端延迟启动 Plugin 的函数，由 polyfill 赋值 */
         startPlugin(): Promise<void>;
@@ -110,7 +110,8 @@ declare global {
 
         /** 兼容旧版命名 */
         connectSocket(): void;
-
+        currentActionName: string | null;
+        currentWindowsId: string;
         /**
          * Stream Dock / Elgato 通用入口函数。
          * 对于 Property Inspector：接收 5 个参数（最后一个是 inActionInfo）。
@@ -122,13 +123,7 @@ declare global {
          * @param info - 应用和插件信息的 JSON 字符串
          * @param actionInfo - (仅 Property Inspector) action 信息的 JSON 字符串
          */
-        connectElgatoStreamDeckSocket(
-            port: string,
-            uuid: string,
-            registerEvent: string,
-            info: string,
-            actionInfo?: string
-        ): void;
+        connectElgatoStreamDeckSocket(port: string, uuid: string, registerEvent: string, info: string, actionInfo?: string): void;
 
         /** 文件选择器回调，用户选择文件后调用 */
         onFilePickerReturn(files: string): void;
@@ -201,7 +196,7 @@ declare global {
                     settings: any;
                     state: number;
                 };
-            },
+            } | null,
         ];
     }
 
@@ -313,6 +308,7 @@ declare global {
         type WillAppear = EventActionWithPayload<
             "willAppear",
             {
+                controller: string;
                 settings: JsonObject;
                 coordinates: Coordinates;
                 state: number;

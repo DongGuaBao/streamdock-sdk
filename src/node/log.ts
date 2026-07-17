@@ -37,8 +37,12 @@ export const log = log4js
     .getLogger();
 
 process.on("uncaughtException", (error) => {
-    log.error("Uncaught Exception:", error);
+    try {
+        log.error("Uncaught Exception:", error);
+    } catch {}
 });
 process.on("unhandledRejection", (reason) => {
-    log.error("Unhandled Rejection:", reason);
+    try {
+        log.error("Unhandled Rejection:", reason);
+    } catch {}
 });

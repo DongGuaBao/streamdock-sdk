@@ -48,4 +48,13 @@ export default defineConfig([
         target: "es2022",
         outDir: "dist/web",
     },
+    {
+        entry: ["src/cef/index.ts"],
+        format: ["esm"],
+        dts: true,
+        sourcemap: true,
+        minify: false,
+        target: "es2022",
+        outDir: "dist/cef",
+    },
 ]);

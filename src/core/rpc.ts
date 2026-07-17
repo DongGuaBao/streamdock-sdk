@@ -6,13 +6,17 @@
  * - 接收方执行方法后回复 `{ __rpc_result: true, __callId, result }` 或 `{ __rpc_result: true, __callId, error }`
  *
  * 使用方式：
- * - Plugin 端: `action.callPropertyInspector('method', ...args)` 或 `action.property.method(...args)`
  * - Property Inspector 端: `property.callPlugin('method', ...args)` 或 `property.action.method(...args)`
- *
- * `action.property` 和 `property.action` 返回 Proxy 对象，将任意属性访问转为 RPC 调用。
  */
 export class RpcChannel {
-    private _pendingCalls = new Map<string, { resolve: (v: any) => void; reject: (e: any) => void }>();
+    private _pendingCalls = new Map<
+        string,
+        {
+            resolve: (v: any) => void;
+            reject: (e: any) => void;
+            timeoutTimer?: ReturnType<typeof setTimeout>;
+        }
+    >();
     private _callId = 0;
 
     /**
@@ -52,6 +56,7 @@ export class RpcChannel {
             const pending = this._pendingCalls.get(payload.__callId);
             if (pending) {
                 this._pendingCalls.delete(payload.__callId);
+                if (pending.timeoutTimer !== undefined) clearTimeout(pending.timeoutTimer);
                 if (payload.error != null) pending.reject(new Error(payload.error));
                 else pending.resolve(payload.result);
             }
@@ -68,10 +73,33 @@ export class RpcChannel {
      * @returns Promise，resolve 为方法的返回值
      */
     call(method: string, ...args: any[]): Promise<any> {
+        return this.callWithTimeout(method, undefined, args);
+    }
+
+    private callWithTimeout(method: string, timeout: number | undefined, args: any[]): Promise<any> {
         const callId = `${++this._callId}`;
         return new Promise((resolve, reject) => {
-            this._pendingCalls.set(callId, { resolve, reject });
-            this.send({ __rpc_call: true, __callId: callId, method, args });
+            const pending: {
+                resolve: (v: any) => void;
+                reject: (e: any) => void;
+                timeoutTimer?: ReturnType<typeof setTimeout>;
+            } = { resolve, reject };
+
+            if (timeout !== undefined) {
+                pending.timeoutTimer = setTimeout(() => {
+                    if (!this._pendingCalls.delete(callId)) return;
+                    reject(new Error(`RPC call "${method}" timed out after ${timeout}ms`));
+                }, timeout);
+            }
+
+            this._pendingCalls.set(callId, pending);
+            try {
+                this.send({ __rpc_call: true, __callId: callId, method, args });
+            } catch (error) {
+                this._pendingCalls.delete(callId);
+                if (pending.timeoutTimer !== undefined) clearTimeout(pending.timeoutTimer);
+                reject(error);
+            }
         });
     }
 
@@ -88,13 +116,20 @@ export class RpcChannel {
      * await plugin.doSomething();  // 等价于 callPlugin('doSomething')
      * ```
      *
+     * @param timeout - 每次 RPC 调用的超时时间（毫秒）；不传则不限制。
      * @returns Proxy 对象
      */
-    createProxy(): any {
+    createProxy(timeout?: number): any {
+        if (timeout !== undefined && (!Number.isFinite(timeout) || timeout < 0)) {
+            throw new RangeError("RPC timeout must be a finite non-negative number");
+        }
         return new Proxy(
             {},
             {
-                get: (_, method: string) => (...args: any[]) => this.call(method, ...args),
+                get:
+                    (_, method: string) =>
+                    (...args: any[]) =>
+                        this.callWithTimeout(method, timeout, args),
             },
         );
     }

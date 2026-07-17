@@ -178,6 +178,7 @@ export abstract class BasePlugin {
      * @remarks 发送 `setState` 命令到 Stream Dock
      */
     setState(context: string, state: number): void {
+        this.setImage(context, "");
         this.ws.send(
             JSON.stringify({
                 event: "setState",

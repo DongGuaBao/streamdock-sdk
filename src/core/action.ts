@@ -21,15 +21,16 @@ import { RpcChannel } from "./rpc";
  * ## 多状态
  *
  * 如果 manifest.json 中定义了多个 States，可以通过 `setState()` 切换。
- *
- * ## RPC 通信
- *
- * Action 可以通过 `callPropertyInspector()` 或 `this.property` Proxy
- * 调用 Property Inspector 端的方法。
  */
 export class Action {
     /** Action 类注册表（类级别，非实例），key = action 名称 → value = Plugin action 注册 key */
     static actions: Record<string, string> = {};
+
+    /**
+     * CEF 端同 action/context 实例的异步 RPC Proxy。
+     * 由 cef-canvas-runtime/streamdock 在初始化时注入；普通插件不初始化 CEF 时不要访问。
+     */
+    declare cef: any;
 
     private _rpc = new RpcChannel((payload) => this.sendToPropertyInspector(payload));
 
@@ -49,6 +50,16 @@ export class Action {
         pluginState.currentAction = data.action || null;
         pluginState.currentContext = data.context || null;
         this.propertyInspectorDidAppear?.(data);
+    }
+    /**
+     * [内部] Property Inspector 消失时的预处理。
+     * 更新 `pluginState` 并调用公开的 `propertyInspectorDidDisappear` 钩子。
+     * **不要在子类中覆盖此方法。**
+     */
+    _propertyInspectorDidDisappear?(data: StreamDockEvents.PropertyInspectorDidAppear) {
+        pluginState.currentAction = null;
+        pluginState.currentContext = null;
+        this.propertyInspectorDidDisappear?.(data);
     }
 
     /**
@@ -210,6 +221,7 @@ export class Action {
 
     /** Property Inspector 在 Stream Dock UI 中显示时触发 */
     propertyInspectorDidAppear?(data: StreamDockEvents.PropertyInspectorDidAppear): void;
+    propertyInspectorDidDisappear?(data: StreamDockEvents.PropertyInspectorDidAppear): void;
 
     /** 取消注册屏幕保护事件时触发 */
     unRegistrationScreenSaverEvent?(data: StreamDockEvents.UnRegistrationScreenSaver): void;

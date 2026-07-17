@@ -53,16 +53,23 @@ export class Plugin extends BasePlugin {
         this.hasInit = true;
         const Self = this;
         window.startPlugin = async function () {
+            try {
+                Self.getInstance().onStart([window.argv[0], window.argv[1], window.argv[2], window.argv[3], window.argv.length >= 5 ? window.argv[4] : null]);
+            } catch {}
             let response: any;
             try {
                 response = await new Promise((resolve, reject) => {
                     const xhr = new XMLHttpRequest();
                     xhr.open("GET", `./${window.argv[3].application.language}.json`);
                     xhr.onload = () => {
-                        if (xhr.status === 200) {
-                            resolve(JSON.parse(xhr.responseText));
-                        } else {
-                            reject(new Error(`HTTP ${xhr.status}`));
+                        try {
+                            if (xhr.status === 200) {
+                                resolve(JSON.parse(xhr.responseText));
+                            } else {
+                                reject(new Error(`HTTP ${xhr.status}`));
+                            }
+                        } catch (error) {
+                            reject(error);
                         }
                     };
                     xhr.onerror = () => reject(new Error("Network error"));
@@ -77,7 +84,11 @@ export class Plugin extends BasePlugin {
 
         ensureSDSocketPolyfill();
     }
-
+    onStart(argv: StreamDock.Argv) {}
+    onMessage(message: any): boolean {
+        return false;
+    }
+    onExit() {}
     /**
      * 启动插件（如果尚未初始化则自动调用 initPlugin）。
      */
@@ -100,17 +111,23 @@ export class Plugin extends BasePlugin {
         this.uuid = window.argv[1];
         this.ws = new WebSocket("ws://127.0.0.1:" + window.argv[0]);
         this.ws.onopen = () => this.ws.send(JSON.stringify({ event: window.argv[2], uuid: window.argv[1] }));
+        this.ws.onclose = () => this.onExit();
+        this.ws.onerror = () => this.onExit();
         this.ws.onmessage = this.onmessage.bind(this);
     }
 
     /** WebSocket 消息处理 */
     onmessage(a: MessageEvent) {
         let e = a.data;
+
+        const data: any = JSON.parse(e.toString());
+        try {
+            if (this.onMessage(data)) return;
+        } catch {}
         if (this.getGlobalSettingsFlag) {
             this.getGlobalSettingsFlag = false;
             this.getGlobalSettings();
         }
-        const data: any = JSON.parse(e.toString());
         if ((this as any)[data.event]) {
             if ((this as any)[data.event](data)) return;
         }

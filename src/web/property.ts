@@ -44,47 +44,75 @@
  *
  * ## RPC 通信
  *
- * Property Inspector 可以通过 `callPlugin()` 或 `this.action` Proxy 调用 Plugin 端方法：
+ * Property Inspector 可以通过 `callPlugin()` 或 `getPluginProxy()` Proxy 调用 Plugin 端方法：
  *
  * ```ts
  * await property.callPlugin('doSomething', arg1, arg2);
  * // 或
- * await property.action.doSomething(arg1, arg2);
+ * const plugin = property.getPluginProxy()
+ * await plugin.doSomething(arg1, arg2);
  * ```
  */
 import "../types";
 import { RpcChannel } from "../core/rpc";
 import { ensureSDSocketPolyfill } from "./polyfill";
-import { createApp, watch, nextTick, reactive, type Reactive } from "vue";
+import { createApp, watch, reactive, type Reactive } from "vue";
+
+/** 子窗口的可序列化状态，不包含原始 Window 句柄。 */
+export interface SubWindowInfo {
+    id: string;
+    name: string;
+    openedAt: number;
+}
+
+interface SubWindowEntry {
+    info: SubWindowInfo;
+    window: Window | null;
+}
+
 interface PropertyInterface {
     /** 运行时配置 */
     settings: JsonObject;
     globalSettings: JsonObject;
     /** 调用插件方法（透传 instance.callPlugin） */
     callPlugin: (...args: any[]) => void;
-    /** 获取当前 action 名称 */
-    getCurrentActionName: () => string;
     /** 获取全局配置 */
     getGlobalSettings: () => void;
     /** 设置全局配置 */
     setGlobalSettings: (data: JsonObject) => void;
+    getI18n: () => any;
     /** 向插件发送消息 */
     sendToPlugin: (payload: JsonObject) => void;
+    /** 在默认浏览器中打开 URL */
+    openUrl: (url: string) => void;
     didReceiveGlobalSettings: (data: StreamDockEvents.DidReceiveGlobalSettings) => void;
     didReceiveSettings: (data: StreamDockEvents.DidReceiveSettings) => void;
+    willAppear: (data: StreamDockEvents.WillAppear) => void;
     setPreventWatch: (preventWatch: boolean) => void;
     sendToPropertyInspector: (data: StreamDockEvents.SendToPropertyInspector) => void;
+    closeSubWindow: (idOrName: string) => void;
+    closeSubWindowsByName: (name: string) => void;
+    getSubWindow: (id: string) => SubWindowInfo | undefined;
+    getSubWindows: () => SubWindowInfo[];
+    openSubWindows: (name: string, width: number, height: number, left?: number | null, top?: number | null) => SubWindowInfo;
+    getCurrentWindowsId: () => string;
+    getPluginProxy: (timeout?: number) => any;
+    onMessage: (data: JsonObject) => boolean;
+    onStart: (argv: StreamDock.Argv) => void;
+    currentSubWindowId: string;
+    /** 当前及历史子窗口状态。 */
+    subWindows: SubWindowInfo[];
 }
+type ExtensibleProperty = PropertyInterface & Record<string, unknown>;
 export class Property {
     /** 全局设置缓存 */
-    private getGlobalSettingsFlag = true;
+    private getGlobalSettingsFlag: boolean = true;
+    private hasDidReceiveSettings: boolean = false;
+    private preventWatch: boolean = false;
     private _rpc = new RpcChannel((payload) => this.sendToPlugin(payload));
-    static instance: Property;
+    static _instance: Property;
     static hasInit: boolean;
-    /** 当前 action 名称（UUID 最后一段） */
-    public actionName!: string;
     /** 是否阻止 settings watch 触发保存（用于防止循环更新） */
-    public preventWatch!: boolean;
     /** 当前语言代码 */
     public language!: string;
     /** `window.argv` 的引用，见 {@link StreamDock.Argv} */
@@ -95,6 +123,9 @@ export class Property {
     public uuid!: string;
     public ws!: WebSocket;
     public reactiveProperty!: Reactive<PropertyInterface>;
+    private pluginProxies = new Map<number | undefined, any>();
+    private subWindowEntries = new Map<string, SubWindowEntry>();
+    private subWindowIdSequence = 0;
     constructor() {}
 
     /**
@@ -105,35 +136,46 @@ export class Property {
      * @param mountApp - Vue 根组件（Property Inspector 的 UI 组件）
      */
     static async initProperty(mountApp: any) {
-        window.PropertyClass = Property;
+        window.PropertyClass = this;
         window.PropertyApp = mountApp;
-        window.startProperty = async function () {
-            let response: any;
-            try {
-                response = await new Promise((resolve, reject) => {
-                    const xhr = new XMLHttpRequest();
-                    xhr.open("GET", `./${window.argv[3].application.language}.json`);
-                    xhr.onreadystatechange = () => {
-                        if (xhr.readyState === 4) {
-                            resolve(JSON.parse(xhr.responseText));
-                        }
-                    };
-                    xhr.onerror = () => reject(new Error("Network error"));
-                    xhr.send();
-                });
-                window._i18n = response["Localization"] || {};
-            } catch {
-                window._i18n = {};
-            }
-            Property.getInstance().actionName = window.argv[4].action.split(".").pop() || "";
-            Property.getReactiveInstance();
-            Property.getInstance().connect();
+        if (window.opener != null) {
+            window.i18n = window.opener.i18n;
+            const url = new URL(window.location.href);
+            window.currentActionName = url.searchParams.get("name");
+            window.currentWindowsId = url.searchParams.get("windowId") || "main";
             createApp(window.PropertyApp).mount("#app");
-        };
+        } else {
+            window.startProperty = async function () {
+                try {
+                    window.PropertyClass.getReactiveInstance().onStart([window.argv[0], window.argv[1], window.argv[2], window.argv[3], window.argv.length >= 5 ? window.argv[4] : null]);
+                } catch {}
 
-        ensureSDSocketPolyfill();
+                let response: any;
+                try {
+                    response = await new Promise((resolve, reject) => {
+                        const xhr = new XMLHttpRequest();
+                        xhr.open("GET", `./${window.argv[3].application.language}.json`);
+                        xhr.onreadystatechange = () => {
+                            if (xhr.readyState === 4) {
+                                resolve(JSON.parse(xhr.responseText));
+                            }
+                        };
+                        xhr.onerror = () => reject(new Error("Network error"));
+                        xhr.send();
+                    });
+                    window._i18n = response["Localization"] || {};
+                } catch {
+                    window._i18n = {};
+                }
+                window.currentActionName = window.argv[4]?.action.split(".").pop() || "";
+                window.currentWindowsId = "main";
+                window.PropertyClass.getReactiveInstance();
+                window.PropertyClass.getInstance().connect();
+                createApp(window.PropertyApp).mount("#app");
+            };
+            ensureSDSocketPolyfill();
+        }
     }
-
     /**
      * 启动 Property Inspector（如果尚未初始化则自动调用 initProperty）。
      *
@@ -144,33 +186,69 @@ export class Property {
             await this.initProperty(mountApp);
         }
     }
-
     /**
      * 获取/创建 Property 单例。
      *
      * @returns Property 单例实例
      */
-    static getInstance(): Property {
-        if (!Property.instance) {
-            Property.instance = new Property();
+    static getInstance<T extends Property>(this: new () => T): T {
+        if (window.opener != null) {
+            return window.opener.PropertyClass.getInstance();
         }
-        return Property.instance;
+        if (!Property._instance) {
+            Property._instance = new this() as unknown as Property;
+        }
+        return Property._instance as unknown as T;
     }
-    static getReactiveInstance(): Reactive<PropertyInterface> {
-        const property = Property.getInstance();
+    static getI18n(): any {
+        return window.i18n;
+    }
+    static getReactiveInstance(): Reactive<ExtensibleProperty> {
+        if (window.opener != null) {
+            const parentReactive = window.opener.PropertyClass.getReactiveInstance();
+            const currentSubWindowId = window.currentWindowsId;
+            return new Proxy(parentReactive, {
+                get(target, prop, receiver) {
+                    if (prop === "currentSubWindowId") {
+                        return currentSubWindowId;
+                    }
+                    if (prop === "getCurrentWindowsId") {
+                        return () => currentSubWindowId;
+                    }
+                    return Reflect.get(target, prop, receiver);
+                },
+                set(target, prop, value, receiver) {
+                    return Reflect.set(target, prop, value, receiver);
+                },
+            });
+        }
+        const property = this.getInstance();
         if (!property.reactiveProperty) {
             property.reactiveProperty = reactive({
                 settings: {},
                 globalSettings: {},
+                currentSubWindowId: "main",
                 callPlugin: (method: string, ...args: any[]) => property.callPlugin(method, ...args),
-                getCurrentActionName: () => property.getCurrentActionName(),
                 getGlobalSettings: () => property.getGlobalSettings(),
                 setGlobalSettings: (data: JsonObject) => property.setGlobalSettings(data),
                 sendToPlugin: (payload: JsonObject) => property.sendToPlugin(payload),
+                openUrl: (url: string) => property.openUrl(url),
                 didReceiveGlobalSettings: (data: StreamDockEvents.DidReceiveGlobalSettings) => {},
                 didReceiveSettings: (data: StreamDockEvents.DidReceiveSettings) => {},
                 setPreventWatch: (preventWatch: boolean) => property.setPreventWatch(preventWatch),
                 sendToPropertyInspector: (data: StreamDockEvents.SendToPropertyInspector) => {},
+                getI18n: () => window.i18n,
+                getCurrentWindowsId: () => "main",
+                closeSubWindow: (idOrName: string) => property.closeSubWindow(idOrName),
+                closeSubWindowsByName: (name: string) => property.closeSubWindowsByName(name),
+                getSubWindow: (id: string) => property.getSubWindow(id),
+                getSubWindows: () => property.getSubWindows(),
+                willAppear: (data: StreamDockEvents.WillAppear) => {},
+                onMessage: (data: JsonObject) => false,
+                onStart: (data: StreamDock.Argv) => {},
+                getPluginProxy: (timeout?: number) => property.getPluginProxy(timeout),
+                openSubWindows: (name: string, width: number, height: number, left: number | null = null, top: number | null = null) => property.openSubWindows(name, width, height, left, top),
+                subWindows: [],
             });
         }
         return property.reactiveProperty;
@@ -190,13 +268,13 @@ export class Property {
         this.uuid = window.argv[1];
         this.language = window.argv[3].application.language;
         this.args = window.argv;
-        this.reactiveProperty.settings = window.argv[4].payload.settings;
-        this.preventWatch = false;
+        this.reactiveProperty.settings = window.argv[4]?.payload.settings;
         watch(
             () => this.reactiveProperty.settings,
             (newVal) => {
-                if (this.preventWatch) return;
-                console.log("change");
+                if (this.preventWatch) {
+                    return;
+                }
                 this.ws.send(
                     JSON.stringify({
                         event: "setSettings",
@@ -205,31 +283,121 @@ export class Property {
                     }),
                 );
             },
-            { deep: true },
+            { deep: true, flush: "sync" },
         );
+    }
+    /**
+     * 获取 Plugin RPC Proxy。
+     *
+     * 相同超时时间会复用同一个 Proxy；不传超时时间时复用默认的无超时 Proxy。
+     */
+    getPluginProxy(timeout?: number) {
+        if (!this.pluginProxies.has(timeout)) {
+            this.pluginProxies.set(timeout, this._rpc.createProxy(timeout));
+        }
+        return this.pluginProxies.get(timeout);
+    }
+    /**
+     * 打开并记录一个子窗口。
+     *
+     * @returns 包含唯一 ID 和当前状态的子窗口信息。
+     */
+    openSubWindows(name: string, width: number, height: number, left: number | null = null, top: number | null = null): SubWindowInfo {
+        const ratio = window.devicePixelRatio || 1;
+        const popupWidth = width * ratio;
+        const popupHeight = height * ratio;
+        const screenWidth = window.screen.width;
+        const screenHeight = window.screen.height;
+        const popupLeft = left ?? (screenWidth - popupWidth) / 2;
+        const popupTop = top ?? (screenHeight - popupHeight) / 2;
+        const id = this.createSubWindowId();
+        const childWindow = window.open(
+            `./index.html?name=${encodeURIComponent(name)}&windowId=${encodeURIComponent(id)}`,
+            "_blank",
+            `width=${popupWidth},height=${popupHeight},top=${popupTop},left=${popupLeft}`,
+        );
+        const now = Date.now();
+        const info: SubWindowInfo = {
+            id,
+            name,
+            openedAt: now,
+        };
+
+        this.subWindowEntries.set(id, { info, window: childWindow });
+        return { ...info };
+    }
+    /**
+     * 按 ID 或名称关闭子窗口。
+     *
+     * 优先精确匹配 ID；不存在该 ID 时，关闭所有同名且仍处于打开状态的窗口。
+     */
+    closeSubWindow(idOrName: string) {
+        const entry = this.subWindowEntries.get(idOrName);
+        if (entry) {
+            if (entry.window != null && !entry.window?.closed) entry.window?.close();
+            this.subWindowEntries.delete(idOrName);
+        } else {
+            this.closeSubWindowsByName(idOrName);
+        }
+    }
+    /** 关闭指定名称的所有仍处于打开状态的子窗口。 */
+    closeSubWindowsByName(name: string) {
+        for (const entry of this.subWindowEntries.values()) {
+            if (entry.info.name === name) {
+                if (entry.window != null && !entry.window?.closed) entry.window?.close();
+                this.subWindowEntries.delete(entry.info.id);
+            }
+        }
+    }
+    /** 获取一个子窗口的最新状态快照。 */
+    getSubWindow(id: string): SubWindowInfo | undefined {
+        const info = this.subWindowEntries.get(id)?.info;
+        return info ? { ...info } : undefined;
+    }
+    /** 获取所有子窗口（包含已关闭和被拦截窗口）的状态快照。 */
+    getSubWindows(): SubWindowInfo[] {
+        return Array.from(this.subWindowEntries.values(), ({ info }) => ({ ...info }));
+    }
+    private createSubWindowId(): string {
+        if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+            return crypto.randomUUID();
+        }
+        this.subWindowIdSequence++;
+        return `subwindow-${Date.now()}-${this.subWindowIdSequence}`;
+    }
+    getI18n(): any {
+        return window.i18n;
     }
 
     /** WebSocket 消息处理 */
-    onmessage(a: MessageEvent) {
+    async onmessage(a: MessageEvent) {
         let e = a.data;
+
+        const data = JSON.parse(e.toString());
+        try {
+            if (this.reactiveProperty.onMessage(data)) return;
+        } catch {}
         if (this.getGlobalSettingsFlag) {
             this.getGlobalSettingsFlag = false;
             this.getGlobalSettings();
         }
-        const data = JSON.parse(e.toString());
         if (data.event === "didReceiveGlobalSettings") {
             this.reactiveProperty.globalSettings = data.payload.settings;
             this.didReceiveGlobalSettings?.(data);
             this.reactiveProperty.didReceiveGlobalSettings(data);
         }
         if (data.event === "didReceiveSettings") {
-            this.preventWatch = true;
-            this.reactiveProperty.settings = data.payload.settings;
-            nextTick(() => {
+            if (this.hasDidReceiveSettings) {
+                this.preventWatch = true;
+                this.reactiveProperty.settings = data.payload.settings;
+                this.didReceiveSettings?.(data);
+                this.reactiveProperty.didReceiveSettings(data);
                 this.preventWatch = false;
-            });
-            this.didReceiveSettings?.(data);
-            this.reactiveProperty.didReceiveSettings(data);
+            } else {
+                this.hasDidReceiveSettings = true;
+                this.willAppear?.(data);
+                this.reactiveProperty.willAppear(data);
+            }
         }
         if (data.event === "sendToPropertyInspector") {
             this.sendToPropertyInspectorEvent(data);
@@ -247,14 +415,14 @@ export class Property {
             JSON.stringify({
                 event: "setGlobalSettings",
                 context: this.uuid,
-                data,
+                payload: data,
             }),
         );
     }
 
     /** 获取当前 action 名称 */
-    getCurrentActionName(): string {
-        return this.actionName;
+    static getCurrentActionName(): string {
+        return window.currentActionName || "";
     }
 
     /** 请求全局持久化数据 */
@@ -276,9 +444,23 @@ export class Property {
         this.ws.send(
             JSON.stringify({
                 event: "sendToPlugin",
-                action: this.args[4].action,
+                action: this.args[4]?.action,
                 context: this.args[1],
                 payload,
+            }),
+        );
+    }
+
+    /**
+     * 在默认浏览器中打开 URL。
+     *
+     * 适用于教程、开发者文档等外部链接；内部 Vue 子窗口请使用 openSubWindows。
+     */
+    openUrl(url: string) {
+        this.ws.send(
+            JSON.stringify({
+                event: "openUrl",
+                payload: { url },
             }),
         );
     }
@@ -310,6 +492,7 @@ export class Property {
     }
     /** settings 改变后触发（可选实现） */
     didReceiveSettings?(data: StreamDockEvents.DidReceiveSettings): void;
+    willAppear?(data: StreamDockEvents.WillAppear): void;
     didReceiveGlobalSettings?: (data: StreamDockEvents.DidReceiveGlobalSettings) => void;
     sendToPropertyInspector?: (data: StreamDockEvents.SendToPropertyInspector) => void;
 }

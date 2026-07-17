@@ -1,6 +1,6 @@
 {
     "name": "@mirabox/streamdock-sdk",
-    "version": "2.0.0",
+    "version": "2.1.0",
     "type": "module",
     "description": "StreamDock plugin development SDK",
     "author": "MiraBox",
@@ -26,6 +26,10 @@
         "./property": {
             "types": "./dist/web/property.d.mts",
             "import": "./dist/web/property.mjs"
+        },
+        "./cef": {
+            "types": "./dist/cef/index.d.mts",
+            "import": "./dist/cef/index.mjs"
         },
         "./types": {
             "types": "./dist/types.d.mts"

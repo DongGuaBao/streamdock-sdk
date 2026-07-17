@@ -38,6 +38,22 @@ import path from "path";
 
 export { Action, log };
 
+function summarizePayload(payload: any) {
+    const settings = payload?.settings ?? payload ?? {};
+    const clientId = typeof settings?.clientId === "string" ? settings.clientId : "";
+    const clientSecret = typeof settings?.clientSecret === "string" ? settings.clientSecret : "";
+    const accessToken = typeof settings?.accessToken === "string" ? settings.accessToken : "";
+    return {
+        payloadKeys: payload && typeof payload === "object" ? Object.keys(payload) : [],
+        settingsKeys: settings && typeof settings === "object" ? Object.keys(settings) : [],
+        hasClientId: Boolean(clientId),
+        clientIdPreview: clientId ? `${clientId.slice(0, 4)}...${clientId.slice(-4)}` : "",
+        hasClientSecret: Boolean(clientSecret),
+        clientSecretLength: clientSecret.length,
+        hasAccessToken: Boolean(accessToken),
+    };
+}
+
 export class Plugin extends BasePlugin {
     declare ws: WebSocket;
 
@@ -62,8 +78,14 @@ export class Plugin extends BasePlugin {
             global.language = JSON.parse(process.argv[9]).application.language;
             global.i18n = JSON.parse(fs.readFileSync(path.join(process.cwd(), `language/${language}.json`)).toString());
         } else {
+            const application = JSON.parse(process.argv[9].replaceAll("'", '"'));
+            const pluginTemp = process.argv.length >= 12 ? JSON.parse(process.argv[11].replaceAll("'", '"')) : null;
             try {
-                global.language = JSON.parse(process.argv[9]).application.language;
+                this.getInstance().onStart([process.argv[3], process.argv[5], process.argv[7], application, pluginTemp]);
+            } catch {}
+
+            try {
+                global.language = application.application.language;
                 global.i18n = JSON.parse(fs.readFileSync(path.join(process.cwd(), `${language}.json`)).toString());
             } catch {}
         }
@@ -71,7 +93,13 @@ export class Plugin extends BasePlugin {
         log.info("start plugin");
         this.getInstance().connect();
     }
-
+    onStart(argv: StreamDock.Argv) {}
+    onExit(): boolean {
+        return false;
+    }
+    onMessage(message: any): boolean {
+        return false;
+    }
     /**
      * 建立 WebSocket 连接并注册到 Stream Dock。
      *
@@ -88,18 +116,30 @@ export class Plugin extends BasePlugin {
         this.ws.on("open", () => {
             this.ws.send(JSON.stringify({ uuid: process.argv[5], event: process.argv[7] }));
         });
-        this.ws.on("close", process.exit);
+        this.ws.on("close", () => {
+            try {
+                if (!this.onExit()) process.exit();
+            } catch {
+                process.exit();
+            }
+        });
         this.ws.on("message", (e) => {
+            const data: any = JSON.parse(e.toString());
+            if (data.event === "didReceiveGlobalSettings") {
+                log.info("SDK received didReceiveGlobalSettings", summarizePayload(data.payload));
+            } else if (data.event === "sendToPlugin" && data.payload?.__authDebug) {
+                log.info("SDK received auth debug sendToPlugin", data.payload);
+            }
+            if (this.onMessage(data)) return;
             if (this.getGlobalSettingsFlag) {
                 this.getGlobalSettingsFlag = false;
                 this.getGlobalSettings();
             }
-            const data: any = JSON.parse(e.toString());
+            if (data.event === "didReceiveGlobalSettings") {
+                this.globalSettings = (data.payload?.settings ?? data.payload ?? {}) as JsonObject;
+            }
             if ((this as any)[data.event]) {
                 if ((this as any)[data.event](data)) return;
-            }
-            if (data.event === "didReceiveGlobalSettings") {
-                this.globalSettings = data.payload as JsonObject;
             }
 
             this.dispatchAction(data);
