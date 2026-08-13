@@ -26,12 +26,6 @@ export class Action {
     /** Action 类注册表（类级别，非实例），key = action 名称 → value = Plugin action 注册 key */
     static actions: Record<string, string> = {};
 
-    /**
-     * CEF 端同 action/context 实例的异步 RPC Proxy。
-     * 由 cef-canvas-runtime/streamdock 在初始化时注入；普通插件不初始化 CEF 时不要访问。
-     */
-    declare cef: any;
-
     private _rpc = new RpcChannel((payload) => this.sendToPropertyInspector(payload));
 
     /** 操作实例的唯一标识符（由 Stream Dock 在 willAppear 时分配） */

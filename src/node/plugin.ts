@@ -56,7 +56,17 @@ function summarizePayload(payload: any) {
 
 export class Plugin extends BasePlugin {
     declare ws: WebSocket;
-
+    static devWaitForInspector() {
+        if (process.argv.some((ele) => ele == "-dev")) {
+            try {
+                const port = parseInt(process.env.STREAMDOCK_DEBUG_PORT || "9229", 10);
+                inspector.open(port, "127.0.0.1", true);
+                log.info("Inspector listening at:", inspector.url());
+            } catch (e) {
+                log.info("Failed to open inspector:", e);
+            }
+        }
+    }
     /**
      * 启动插件：初始化语言/i18n，建立 WebSocket 连接。
      *
@@ -66,22 +76,17 @@ export class Plugin extends BasePlugin {
      */
     static async startPlugin() {
         this.hasInit = true;
+        const application = JSON.parse(process.argv[9].replaceAll("'", '"')) as StreamDock.ApplicationInfo;
+        const instance = this.getInstance();
+        instance.setHostInfo(application);
 
         if (process.argv.some((ele) => ele == "-dev")) {
-            try {
-                const port = parseInt(process.env.STREAMDOCK_DEBUG_PORT || "9229", 10);
-                inspector.open(port, "127.0.0.1", true);
-                log.info("Inspector listening at:", inspector.url());
-            } catch (e) {
-                log.info("Failed to open inspector:", e);
-            }
-            global.language = JSON.parse(process.argv[9]).application.language;
+            global.language = application.application.language;
             global.i18n = JSON.parse(fs.readFileSync(path.join(process.cwd(), `language/${language}.json`)).toString());
         } else {
-            const application = JSON.parse(process.argv[9].replaceAll("'", '"'));
             const pluginTemp = process.argv.length >= 12 ? JSON.parse(process.argv[11].replaceAll("'", '"')) : null;
             try {
-                this.getInstance().onStart([process.argv[3], process.argv[5], process.argv[7], application, pluginTemp]);
+                instance.onStart([process.argv[3], process.argv[5], process.argv[7], application, pluginTemp]);
             } catch {}
 
             try {
@@ -91,7 +96,7 @@ export class Plugin extends BasePlugin {
         }
 
         log.info("start plugin");
-        this.getInstance().connect();
+        instance.connect();
     }
     onStart(argv: StreamDock.Argv) {}
     onExit(): boolean {

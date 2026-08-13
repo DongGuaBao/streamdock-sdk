@@ -1,5 +1,6 @@
 import "../types";
 import { pluginState } from "./state";
+import { detectHostEnvironment, type HostEnvironment } from "./environment";
 
 /**
  * Action 实例的接口约束。
@@ -58,6 +59,18 @@ export abstract class BasePlugin {
     globalSettings: JsonObject = {};
     /** 当前语言代码，如 "zh_CN"、"en" */
     language: string = "";
+    /** 当前宿主环境；在 onStart 调用前由 SDK 根据 application.version 设置。 */
+    environment: HostEnvironment = detectHostEnvironment(undefined);
+    get isCraft(): boolean {
+        return this.environment.isCraft;
+    }
+    get isStreamDock(): boolean {
+        return this.environment.isStreamDock;
+    }
+    /** 由 Node/Web 启动器注入解析后的宿主信息。 */
+    setHostInfo(info: StreamDock.ApplicationInfo): void {
+        this.environment = detectHostEnvironment(info);
+    }
     /**
      * Action 类注册表。
      * key = action UUID 的最后一段（如 "action1"），

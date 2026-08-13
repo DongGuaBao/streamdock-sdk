@@ -112,6 +112,14 @@ declare global {
         connectSocket(): void;
         currentActionName: string | null;
         currentWindowsId: string;
+        /** SDK 内部：父 Property Inspector 向子窗口同步响应式状态。 */
+        __streamDockSyncProperty?: (state: {
+            settings: JsonObject;
+            globalSettings: JsonObject;
+            environment: unknown;
+            isCraft: boolean;
+            isStreamDock: boolean;
+        }) => void;
         /**
          * Stream Dock / Elgato 通用入口函数。
          * 对于 Property Inspector：接收 5 个参数（最后一个是 inActionInfo）。
@@ -151,6 +159,21 @@ declare global {
      * ```
      */
     namespace StreamDock {
+        type ApplicationInfo = {
+            application: {
+                font: string;
+                language: string;
+                platform: string;
+                platformVersion: string;
+                version: string;
+            };
+            plugin: {
+                uuid: string;
+                version: string;
+            };
+            [key: string]: any;
+        };
+
         /**
          * `window.argv` 的类型 —— `connectElgatoStreamDeckSocket` 参数
          * 经 JSON 解析后的数组。
@@ -169,19 +192,7 @@ declare global {
             /** 注册事件名称 */
             string,
             /** 应用信息 */
-            {
-                application: {
-                    font: string;
-                    language: string;
-                    platform: string;
-                    platformVersion: string;
-                    version: string;
-                };
-                plugin: {
-                    uuid: string;
-                    version: string;
-                };
-            },
+            ApplicationInfo,
             /** (仅 Property Inspector) action 信息 */
             {
                 action: string;

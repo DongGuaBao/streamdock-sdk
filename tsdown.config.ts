@@ -33,7 +33,7 @@ export default defineConfig([
         sourcemap: true,
         deps: { neverBundle: ["vue"] },
         minify: false,
-        target: "es2022",
+        target: "es2020",
         outDir: "dist/web",
     },
     {
@@ -45,8 +45,20 @@ export default defineConfig([
             neverBundle: ["vue"],
         },
         minify: false,
-        target: "es2022",
+        target: "es2020",
         outDir: "dist/web",
+    },
+    {
+        entry: ["src/web/ui/index.ts"],
+        format: ["esm"],
+        dts: true,
+        sourcemap: true,
+        deps: {
+            neverBundle: ["vue"],
+        },
+        minify: false,
+        target: "es2020",
+        outDir: "dist/web/ui",
     },
     {
         entry: ["src/cef/index.ts"],
@@ -54,7 +66,7 @@ export default defineConfig([
         dts: true,
         sourcemap: true,
         minify: false,
-        target: "es2022",
+        target: "es2020",
         outDir: "dist/cef",
     },
 ]);

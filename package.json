@@ -27,6 +27,10 @@
             "types": "./dist/web/property.d.mts",
             "import": "./dist/web/property.mjs"
         },
+        "./ui": {
+            "types": "./dist/web/ui/index.d.mts",
+            "import": "./dist/web/ui/index.mjs"
+        },
         "./cef": {
             "types": "./dist/cef/index.d.mts",
             "import": "./dist/cef/index.mjs"
@@ -44,10 +48,10 @@
         "ws": "^8.21.0"
     },
     "devDependencies": {
-        "@types/node": "^25.9.1",
+        "@types/node": "^26.1.1",
         "@types/ws": "^8.18.1",
-        "tsdown": "^0.22.1",
-        "typescript": "^6.0.3"
+        "tsdown": "^0.22.12",
+        "typescript": "^7.0.2"
     },
     "scripts": {
         "build": "tsdown",

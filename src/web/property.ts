@@ -55,8 +55,13 @@
  */
 import "../types";
 import { RpcChannel } from "../core/rpc";
+import { detectHostEnvironment, type HostEnvironment } from "../core/environment";
 import { ensureSDSocketPolyfill } from "./polyfill";
 import { createApp, watch, reactive, type Reactive } from "vue";
+
+export { detectHostEnvironment, isCraft, isStreamDock } from "../core/environment";
+export type { HostEnvironment, HostKind } from "../core/environment";
+export { QtWebChannelStore, createCraftQtChannel } from "./qt-web-channel";
 
 /** 子窗口的可序列化状态，不包含原始 Window 句柄。 */
 export interface SubWindowInfo {
@@ -74,6 +79,9 @@ interface PropertyInterface {
     /** 运行时配置 */
     settings: JsonObject;
     globalSettings: JsonObject;
+    environment: HostEnvironment;
+    isCraft: boolean;
+    isStreamDock: boolean;
     /** 调用插件方法（透传 instance.callPlugin） */
     callPlugin: (...args: any[]) => void;
     /** 获取全局配置 */
@@ -115,6 +123,13 @@ export class Property {
     /** 是否阻止 settings watch 触发保存（用于防止循环更新） */
     /** 当前语言代码 */
     public language!: string;
+    public environment: HostEnvironment = detectHostEnvironment(undefined);
+    get isCraft(): boolean {
+        return this.environment.isCraft;
+    }
+    get isStreamDock(): boolean {
+        return this.environment.isStreamDock;
+    }
     /** `window.argv` 的引用，见 {@link StreamDock.Argv} */
     public args!: StreamDock.Argv;
     /** 注册事件名称 */
@@ -126,6 +141,8 @@ export class Property {
     private pluginProxies = new Map<number | undefined, any>();
     private subWindowEntries = new Map<string, SubWindowEntry>();
     private subWindowIdSequence = 0;
+    private static childReactiveProperty?: Reactive<ExtensibleProperty>;
+    private static childSyncingFromParent = false;
     constructor() {}
 
     /**
@@ -146,6 +163,8 @@ export class Property {
             createApp(window.PropertyApp).mount("#app");
         } else {
             window.startProperty = async function () {
+                const instance = window.PropertyClass.getInstance() as Property;
+                instance.setHostInfo(window.argv[3]);
                 try {
                     window.PropertyClass.getReactiveInstance().onStart([window.argv[0], window.argv[1], window.argv[2], window.argv[3], window.argv.length >= 5 ? window.argv[4] : null]);
                 } catch {}
@@ -205,28 +224,63 @@ export class Property {
     }
     static getReactiveInstance(): Reactive<ExtensibleProperty> {
         if (window.opener != null) {
-            const parentReactive = window.opener.PropertyClass.getReactiveInstance();
+            if (this.childReactiveProperty) return this.childReactiveProperty;
+
+            const parentReactive = window.opener.PropertyClass.getReactiveInstance() as ExtensibleProperty;
             const currentSubWindowId = window.currentWindowsId;
-            return new Proxy(parentReactive, {
-                get(target, prop, receiver) {
-                    if (prop === "currentSubWindowId") {
-                        return currentSubWindowId;
-                    }
-                    if (prop === "getCurrentWindowsId") {
-                        return () => currentSubWindowId;
-                    }
-                    return Reflect.get(target, prop, receiver);
+            const clone = <T>(value: T): T => {
+                // settings/globalSettings 按 SDK 协议必须是 JSON；JSON 快照也能安全
+                // 穿过不同窗口、不同 Vue runtime 创建的 Reactive Proxy。
+                return JSON.parse(JSON.stringify(value)) as T;
+            };
+            const local = reactive({
+                ...parentReactive,
+                settings: clone(parentReactive.settings ?? {}),
+                globalSettings: clone(parentReactive.globalSettings ?? {}),
+                currentSubWindowId,
+                getCurrentWindowsId: () => currentSubWindowId,
+            }) as Reactive<ExtensibleProperty>;
+            this.childReactiveProperty = local;
+
+            window.__streamDockSyncProperty = (state) => {
+                this.childSyncingFromParent = true;
+                try {
+                    local.settings = clone(state.settings ?? {});
+                    local.globalSettings = clone(state.globalSettings ?? {});
+                    local.environment = state.environment as HostEnvironment;
+                    local.isCraft = state.isCraft;
+                    local.isStreamDock = state.isStreamDock;
+                } finally {
+                    this.childSyncingFromParent = false;
+                }
+            };
+
+            watch(
+                () => local.settings,
+                (value) => {
+                    if (this.childSyncingFromParent || !window.opener) return;
+                    window.opener.PropertyClass.getInstance().updateSettingsFromSubWindow(clone(value));
                 },
-                set(target, prop, value, receiver) {
-                    return Reflect.set(target, prop, value, receiver);
+                { deep: true, flush: "sync" },
+            );
+            watch(
+                () => local.globalSettings,
+                (value) => {
+                    if (this.childSyncingFromParent || !window.opener) return;
+                    window.opener.PropertyClass.getInstance().setGlobalSettings(clone(value));
                 },
-            });
+                { deep: true, flush: "sync" },
+            );
+            return local;
         }
         const property = this.getInstance();
         if (!property.reactiveProperty) {
             property.reactiveProperty = reactive({
                 settings: {},
                 globalSettings: {},
+                environment: property.environment,
+                isCraft: property.isCraft,
+                isStreamDock: property.isStreamDock,
                 currentSubWindowId: "main",
                 callPlugin: (method: string, ...args: any[]) => property.callPlugin(method, ...args),
                 getGlobalSettings: () => property.getGlobalSettings(),
@@ -268,6 +322,7 @@ export class Property {
         this.uuid = window.argv[1];
         this.language = window.argv[3].application.language;
         this.args = window.argv;
+        this.setHostInfo(window.argv[3]);
         this.reactiveProperty.settings = window.argv[4]?.payload.settings;
         watch(
             () => this.reactiveProperty.settings,
@@ -282,9 +337,22 @@ export class Property {
                         payload: newVal,
                     }),
                 );
+                this.syncSubWindows();
             },
             { deep: true, flush: "sync" },
         );
+    }
+    setHostInfo(info: StreamDock.ApplicationInfo) {
+        this.environment = detectHostEnvironment(info);
+        if (typeof document !== "undefined") {
+            document.documentElement.dataset.miraboxHost = this.environment.kind;
+            document.documentElement.dataset.miraboxDensity = window.innerHeight <= 205 ? "compact" : "comfortable";
+        }
+        if (this.reactiveProperty) {
+            this.reactiveProperty.environment = this.environment;
+            this.reactiveProperty.isCraft = this.isCraft;
+            this.reactiveProperty.isStreamDock = this.isStreamDock;
+        }
     }
     /**
      * 获取 Plugin RPC Proxy。
@@ -383,6 +451,7 @@ export class Property {
         }
         if (data.event === "didReceiveGlobalSettings") {
             this.reactiveProperty.globalSettings = data.payload.settings;
+            this.syncSubWindows();
             this.didReceiveGlobalSettings?.(data);
             this.reactiveProperty.didReceiveGlobalSettings(data);
         }
@@ -390,6 +459,7 @@ export class Property {
             if (this.hasDidReceiveSettings) {
                 this.preventWatch = true;
                 this.reactiveProperty.settings = data.payload.settings;
+                this.syncSubWindows();
                 this.didReceiveSettings?.(data);
                 this.reactiveProperty.didReceiveSettings(data);
                 this.preventWatch = false;
@@ -411,6 +481,7 @@ export class Property {
      */
     setGlobalSettings(data: JsonObject) {
         this.reactiveProperty.globalSettings = data;
+        this.syncSubWindows();
         this.ws.send(
             JSON.stringify({
                 event: "setGlobalSettings",
@@ -418,6 +489,31 @@ export class Property {
                 payload: data,
             }),
         );
+    }
+
+    /** SDK 内部：接收子窗口 settings 修改，交由父窗口统一持久化。 */
+    updateSettingsFromSubWindow(data: JsonObject) {
+        this.reactiveProperty.settings = data;
+    }
+
+    /** 将父窗口状态显式推送到每个子窗口自己的 Vue reactive 镜像。 */
+    private syncSubWindows() {
+        const state = {
+            settings: this.reactiveProperty.settings ?? {},
+            globalSettings: this.reactiveProperty.globalSettings ?? {},
+            environment: this.reactiveProperty.environment,
+            isCraft: this.reactiveProperty.isCraft,
+            isStreamDock: this.reactiveProperty.isStreamDock,
+        };
+        for (const [id, entry] of this.subWindowEntries) {
+            if (!entry.window || entry.window.closed) {
+                this.subWindowEntries.delete(id);
+                continue;
+            }
+            try {
+                entry.window.__streamDockSyncProperty?.(state);
+            } catch {}
+        }
     }
 
     /** 获取当前 action 名称 */

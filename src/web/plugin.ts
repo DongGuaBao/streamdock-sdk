@@ -53,8 +53,10 @@ export class Plugin extends BasePlugin {
         this.hasInit = true;
         const Self = this;
         window.startPlugin = async function () {
+            const instance = Self.getInstance();
+            instance.setHostInfo(window.argv[3]);
             try {
-                Self.getInstance().onStart([window.argv[0], window.argv[1], window.argv[2], window.argv[3], window.argv.length >= 5 ? window.argv[4] : null]);
+                instance.onStart([window.argv[0], window.argv[1], window.argv[2], window.argv[3], window.argv.length >= 5 ? window.argv[4] : null]);
             } catch {}
             let response: any;
             try {
@@ -79,7 +81,7 @@ export class Plugin extends BasePlugin {
             } catch {
                 window._i18n = {};
             }
-            Self.getInstance().connect();
+            instance.connect();
         };
 
         ensureSDSocketPolyfill();
